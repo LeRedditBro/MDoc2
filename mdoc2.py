@@ -1,6 +1,7 @@
 from tags import *
 import os
 import pathlib
+import argparse
 
 # define preset hardcoded extract methods for each supported language
 DOC_PRESETS = {
@@ -11,12 +12,15 @@ DOC_PRESETS = {
     }
 }
 
+out_dir = None
+cwg = os.getcwd()
+
 class_list = []
 # a list of lists, where each list is a list of methods
 method_list = []
 
 
-def create_tags_from_folder(folder_path):
+def create_tags_from_folder(folder_path, rel_path=""):
     """
     @p
     the function runs over all items in the given directory
@@ -26,15 +30,23 @@ def create_tags_from_folder(folder_path):
     @table
     Args:
         folder_path (str): path to the folder to run on
+        rel_path (str): relative path, used for recursive calls
     """
 
-    files_in_folder = os.listdir(folder_path)
+    # files_in_folder = os.listdir(folder_path)
+    # for folder_file in files_in_folder:
+    #     file_path = folder_path + "/" + folder_file
+    #     if os.path.isfile(file_path):
+    #         create_tags_from_file(file_path)
+    #     elif os.path.isdir(file_path):
+    #         create_tags_from_folder(file_path)
+    files_in_folder = os.listdir(folder_path + "/" + rel_path)
     for folder_file in files_in_folder:
         file_path = folder_path + "/" + folder_file
         if os.path.isfile(file_path):
-            create_tags_from_file(file_path)
+            create_tags_from_file(rel_path + folder_file)
         elif os.path.isdir(file_path):
-            create_tags_from_folder(file_path)
+            create_tags_from_folder(folder_path, rel_path + "/" + folder_file + "/")
 
 
 def create_tags_from_file(file_path):
@@ -113,7 +125,7 @@ def create_tags_from_file(file_path):
 
         # generate index file (only if text is present tho)
         if file_index_text:
-            file_index_dir = "mdoc/" + os.path.splitext(file_path)[0][2:]
+            file_index_dir = out_dir + "/" + os.path.splitext(file_path)[0]
             file_index_name = (file_index_dir.split("/")[-1])
             file_index_dir = file_index_dir + "/" + file_index_name
 
@@ -144,10 +156,15 @@ def create_function_page(file_path, class_name, method_name, method_params, meth
         desc (str): the description for the method (if found)
     """
 
-    folder_dir = "mdoc/" + os.path.splitext(file_path)[0][2:] + ("/"+class_name if class_name else "")
+    folder_dir = out_dir + "/" + os.path.splitext(file_path)[0] + ("/"+class_name if class_name else "")
 
     if not os.path.isdir(folder_dir):
         pathlib.Path(folder_dir).mkdir(parents=True, exist_ok=True)
+
+        # write meta.txt to folder to determine its type in the future
+        with open(folder_dir + "/meta.txt", "w") as f:
+            f.write("class" if class_name else "file")
+            f.close()
 
     tags = doc_to_tags(method_doc_body)
 
@@ -194,10 +211,16 @@ def create_class_page(file_path, class_name, class_impl, class_doc_body, class_m
         desc (str): the description for the class (if found)
     """
 
-    folder_dir = "mdoc/" + os.path.splitext(file_path)[0][2:] + ("/" + class_name if class_name else "")
+    folder_dir = out_dir + "/" + os.path.splitext(file_path)[0] + ("/" + class_name)
+    # if class_name else "")
 
     if not os.path.isdir(folder_dir):
         pathlib.Path(folder_dir).mkdir(parents=True, exist_ok=True)
+
+        # write meta.txt to folder to determine its type in the future
+        with open(folder_dir + "/meta.txt", "w") as f:
+            f.write("class")
+            f.close()
 
     tags = doc_to_tags(class_doc_body)
 
@@ -229,5 +252,137 @@ def create_class_page(file_path, class_name, class_impl, class_doc_body, class_m
     return class_name, desc
 
 
+CHAR_X_LEN = 2
+CHAR_Y_LEN = 1
+CHAR_X_PADDING = 2
+
+CHAR_UR = "┗" + ("━" * CHAR_X_LEN)
+# CHAR_UR = "┗" + ("═" * CHAR_X_LEN)
+CHAR_UD = "┃" + (" " * CHAR_X_LEN)
+CHAR_CLEAR = " " + (" " * CHAR_X_LEN)
+CHAR_UDR = "┣" + ("━" * CHAR_X_LEN)
+# CHAR_UDR = "┣" + ("═" * CHAR_X_LEN)
+
+
+def create_file_map(directory, full_dir="", trans_func=None, add_index_files=False, rel=""):
+    """
+    @p
+    used to print a file map, can be used with mapping of file name to either:
+    - print to terminal with color
+    - save to md file for navigation
+
+    @table
+    Returns:
+        string (str): the string file map
+    """
+
+    flag = False
+
+    if not full_dir:
+        flag = True
+        full_dir = directory
+
+    items = [f for f in os.listdir(full_dir) if f != "meta.txt" and (not add_index_files and f != directory+".md") and not (flag and f == "index.md")]
+
+    meta_path = full_dir + "/meta.txt"
+
+    item_type = "dir"
+
+    if os.path.isfile(meta_path):
+        with open(meta_path, "r") as f:
+            item_type = f.read()
+            f.close()
+
+    dir_name = "" if flag else directory
+
+    if trans_func:
+        directory = trans_func(directory, item_type, rel)
+
+    rel = rel + dir_name + "/"
+
+    text = [directory]
+
+    n = len(items)
+
+    for i in range(0, n):
+        item = items[i]
+
+        if i == 0 and CHAR_Y_LEN > 0:
+            text.append(CHAR_UD)
+
+        if i == n-1:
+            mark_type = CHAR_UR
+            mark_ud = CHAR_CLEAR
+        else:
+            mark_type = CHAR_UDR
+            mark_ud = CHAR_UD
+
+        item_dir = full_dir + "/" + item
+
+        if os.path.isfile(item_dir):
+            item_text = trans_func(item, "method", rel)
+
+            if item_text:
+                text.append(mark_type+item_text)
+        else:
+            lines = create_file_map(item, item_dir, trans_func, add_index_files, rel)
+
+            m = len(lines)
+
+            for j in range(0, m):
+
+                line = lines[j]
+
+                if j == 0:
+                    mark_type_j = mark_type
+                else:
+                    mark_type_j = mark_ud
+
+                text.append(mark_type_j + line)
+
+        if CHAR_Y_LEN > 0:
+            text.append(mark_ud)
+
+    return "\n".join([(" " * CHAR_X_PADDING) + f for f in text]) if flag else text
+
+
+ap = argparse.ArgumentParser()
+
+ap.add_argument("out", metavar="OUT", type=str)
+
+
+def tree_item_to_badge(item, item_type, rel):
+
+    print(rel + item)
+
+    switcher = {
+        "dir": item,
+        "class": "<img src=\"https://img.shields.io/badge/Class-%s-cyan.svg?style=flat-square\" height=\"20px\" style=\"vertical-align: bottom\">" % item.replace("_", "__").replace("-", "--"),
+        "method": "<img src=\"https://img.shields.io/badge/Method-%s-orange.svg?style=flat-square\" height=\"20px\" style=\"vertical-align: bottom\">" % item.replace("_", "__").replace("-", "--"),
+        "file": "<a href=\"%s\"><img src=\"https://img.shields.io/badge/File-%s-blue.svg?style=flat-square\" height=\"20px\" style=\"vertical-align: bottom\"></a>" % (rel, item.replace("_", "__").replace("-", "--"))
+    }
+    return switcher.get(item_type, "No item type found ?")
+
+
 if __name__ == "__main__":
-    create_tags_from_folder(".")
+
+    out_arg = ap.parse_args().out
+    out_dir = out_arg + "/mdoc_gen"
+    #
+    # out_dir = cwg + "/mdoc_gen"
+    create_tags_from_folder(cwg)
+
+    print(create_file_map(out_dir, trans_func=lambda name, item_type, rel: ("\033[100;97m" if item_type == "dir" else
+                          "\033[43;97m" if item_type == "method" else
+                          "\033[47;97m" if item_type == "class" else "\033[46;97m") + name + "\033[0m" + (" - class" if item_type == "class" else " - method" if item_type == "method" else " - file" if item_type == "file" else "")))
+
+    with open(out_dir+"/index.md", "w") as fl:
+        fl.write("<h1>Welcome to the automatically generated documentation!</h1><br><p>Have a look at what we have to offer:</p><br><pre>\"")
+        fl.write(create_file_map(out_dir, trans_func=tree_item_to_badge))
+        fl.write("\"</pre>")
+        fl.close()
+
+    print("Created markdown for project! at:")
+    print("\033[44;97m%s\033[0m\n" % out_dir)
+
+
